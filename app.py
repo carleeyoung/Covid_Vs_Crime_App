@@ -1,80 +1,63 @@
-# import necessary libraries
-from models import create_classes
-import os
-from flask import (
-    Flask,
-    render_template,
-    jsonify,
-    request,
-    redirect)
+import sqlalchemy
+from sqlalchemy.ext.automap import automap_base
+from sqlalchemy.orm import Session
+from sqlalchemy import create_engine, func, inspect
+from flask import Flask, jsonify, render_template
 
-#################################################
-# Flask Setup
-#################################################
+engine = create_engine("sqlite:///covid_db.sqlite")
+
+# reflect an existing database into a new model
+Base = automap_base()
+# reflect the tables
+Base.prepare(engine, reflect=True)
+
+covid_stats = Base.classes.covid_stats
+crime_stats = Base.classes.crime_stats
+pop_stats = Base.classes.pop_stats
+
 app = Flask(__name__)
 
-#################################################
-# Database Setup
-#################################################
-
-from flask_sqlalchemy import SQLAlchemy
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', '') or "sqlite:///db.sqlite"
-
-# Remove tracking modifications
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-db = SQLAlchemy(app)
-
-Pet = create_classes(db)
-
-# create route that renders index.html template
 @app.route("/")
 def home():
-    return render_template("index.html")
+    return render_template('index.html')
 
+@app.route('/data')
+def covid():
+    session = Session(engine)
 
-# Query the database and send the jsonified results
-@app.route("/send", methods=["GET", "POST"])
-def send():
-    if request.method == "POST":
-        name = request.form["petName"]
-        lat = request.form["petLat"]
-        lon = request.form["petLon"]
+    covid = session.query(covid_stats.Zipcode, covid_stats.COVID19_Cases).order_by(covid_stats.COVID19_Cases).all()
+    crime= session.query(crime_stats.Zipcode, crime_stats.Report_No).order_by(crime_stats.Zipcode).all()
+    pop= session.query(pop_stats.Zipcode, pop_stats.Population).order_by(pop_stats.Zipcode).all()
 
-        pet = Pet(name=name, lat=lat, lon=lon)
-        db.session.add(pet)
-        db.session.commit()
-        return redirect("/", code=302)
+    data_list = []
+    covid_list = []
+    for Zipcode, COVID19_Cases in covid:
+        covid_dict = {}
+        covid_dict['zipcode'] = Zipcode
+        covid_dict['covid_cases'] = COVID19_Cases
+        covid_list.append(covid_dict)
+    data_list.append(covid_list)
+    
+    crime_list = []
+    for Zipcode, Report_No in crime:
+        crime_dict = {}
+        crime_dict['zipcode'] = Zipcode
+        crime_dict['crime_cases'] = Report_No
+        crime_list.append(crime_dict)
+    data_list.append(crime_list)
 
-    return render_template("form.html")
+    pop_list = []
+    for Zipcode, Population in pop:
+        pop_dict = {}
+        pop_dict['zipcode'] = Zipcode
+        pop_dict['population'] = Population
+        pop_list.append(pop_dict)
+    data_list.append(pop_list)
 
-
-@app.route("/api/pals")
-def pals():
-    results = db.session.query(Pet.name, Pet.lat, Pet.lon).all()
-
-    hover_text = [result[0] for result in results]
-    lat = [result[1] for result in results]
-    lon = [result[2] for result in results]
-
-    pet_data = [{
-        "type": "scattergeo",
-        "locationmode": "USA-states",
-        "lat": lat,
-        "lon": lon,
-        "text": hover_text,
-        "hoverinfo": "text",
-        "marker": {
-            "size": 50,
-            "line": {
-                "color": "rgb(8,8,8)",
-                "width": 1
-            },
-        }
-    }]
-
-    return jsonify(pet_data)
+    return jsonify(data_list)
 
 
 if __name__ == "__main__":
     app.run()
+
+    
